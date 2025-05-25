@@ -1,3 +1,5 @@
+#!/bin/bash
+
 START_TIME=$(date +%s)
 USERID=$(id -u)
 R="\e[31m"
@@ -7,12 +9,13 @@ N="\e[0m"
 LOGS_FOLDER="/var/log/roboshop-logs"
 SCRIPT_NAME=$(echo $0 | cut -d "." -f1)
 LOG_FILE="$LOGS_FOLDER/$SCRIPT_NAME.log"
+SCRIPT_DIR=$PWD
 
 mkdir -p $LOGS_FOLDER
 echo "Script started executing at: $(date)" | tee -a $LOG_FILE
 
 # check the user has root priveleges or not
-check_rootaccess(){
+check_root(){
     if [ $USERID -ne 0 ]
     then
         echo -e "$R ERROR:: Please run this script with root access $N" | tee -a $LOG_FILE
@@ -38,7 +41,31 @@ print_time(){
     echo -e "script executed successfully $Y time taken $TOTAL_TIME seconds $N"
 }
 
-nodejs(){
+
+app_setup(){
+    id roboshop
+    if [ $? -ne 0 ]
+    then
+        useradd --system --home /app --shell /sbin/nologin --comment "roboshop system user" roboshop    
+        VALIDATE $? "creating roboshop system user"
+    else 
+        echo -e "system user roboshop alraedy cretaed .... $Y skipping $N"
+    fi    
+    mkdir -p /app 
+    VALIDATE $? "careating app  directory"
+    
+    
+    curl -o /tmp/$app_name.zip https://roboshop-artifacts.s3.amazonaws.com/$app_name-v3.zip  &>>$LOG_FILE
+    VALIDATE $? "Dowlinding $app_name "
+    
+    rm -rf /app/*
+    cd /app 
+    
+    unzip /tmp/$app_name.zip &>>$LOG_FILE
+    VALIDATE $? "unziping $app_name"
+}
+
+nodejs_setup(){
     dnf module disable nodejs -y &>>$LOG_FILE
     VALIDATE $? "disabling default nodejs"
     
@@ -48,4 +75,22 @@ nodejs(){
     
     dnf install nodejs -y &>>$LOG_FILE
     VALIDATE $? "insatalling nodejs"
+
+    npm install &>>$LOG_FILE
+    VALIDATE $?  "installing dependies"
+}
+
+systemd_setup(){
+    cp $SCRIPT_DIR/$app_name.service /etc/systemd/system/$app_name.service
+    VALIDATE $? "copy the calalogue service"
+    
+    systemctl daemon-reload &>>$LOG_FILE
+    systemctl enable $app_name  &>>$LOG_FILE
+    systemctl start $app_name
+    VALIDATE $? "starting $app_name"
+    
+    
+    cp $SCRIPT_DIR/mongo.repo /etc/yum.repos.d/mongo.repo
+    dnf install mongodb-mongosh -y &>>$LOG_FILE
+    VALIDATE $? "installing Mongodb client"
 }
